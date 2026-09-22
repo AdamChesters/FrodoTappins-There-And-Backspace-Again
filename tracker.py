@@ -20,6 +20,8 @@ import os
 import sys
 from pathlib import Path
 import updater
+from types import SimpleNamespace
+import cloud_sync
 
 # The replacement helper must never start a second keyboard counter or GUI.
 if __name__ == "__main__" and "--apply-update" in sys.argv:
@@ -65,7 +67,7 @@ HAVE_TRAY = True
 APP_NAME = "FrodoTappins"
 # Full display name: shown in the window title, tray tooltip, and dialogs.
 APP_DISPLAY_NAME = "FrodoTappins - There and Backspace Again"
-FIELDS = ("keystrokes", "words", "deletions", "alt_tabs", "power_cycles")
+FIELDS = cloud_sync.FIELDS
 
 # Word-count milestones: how your all-time word total compares to Tolkien's
 # works. Counts are widely-cited approximate figures. The LotR aggregate is the
@@ -166,9 +168,24 @@ class Store:
     def _load(self) -> dict:
         try:
             with open(DATA_PATH, "r", encoding="utf-8") as f:
-                return json.load(f)
-        except Exception:
+                data = json.load(f)
+            if (not isinstance(data, dict) or not isinstance(data.get("device_id"), str)
+                    or not data["device_id"] or not isinstance(data.get("days", {}), dict)
+                    or not isinstance(data.get("minutes", {}), dict)):
+                raise ValueError("Invalid saved identity or history")
+            for tier in ("days", "minutes"):
+                for bucket in data.get(tier, {}).values():
+                    if not isinstance(bucket, dict):
+                        raise ValueError("Invalid history bucket")
+                    for field in FIELDS:
+                        if type(bucket.get(field, 0)) is not int or bucket.get(field, 0) < 0:
+                            raise ValueError("Invalid history count")
+            return data
+        except FileNotFoundError:
             return {}
+        except Exception as error:
+            raise RuntimeError("Could not read data.json. Your existing file was preserved. "
+                               "Restore a valid copy before starting the counter.") from error
 
     def save(self):
         with self.lock:
@@ -260,12 +277,18 @@ class Store:
             if old:
                 self._dirty = True
 
-    def days_payload(self) -> list:
+    def cache_cloud(self, endpoint, totals):
+        cloud_sync.validate_cloud(totals)
         with self.lock:
-            return [
-                {"day": d, **{f: bucket.get(f, 0) for f in FIELDS}}
-                for d, bucket in self.data["days"].items()
-            ]
+            self.data["cloud_cache"] = {
+                "endpoint": endpoint, "totals": totals,
+                "fetched_at": dt.datetime.now(dt.timezone.utc).isoformat(timespec="seconds"),
+            }
+            self._dirty = True
+
+    def cloud_cache(self):
+        with self.lock:
+            return self.data.get("cloud_cache")
 
     def identity(self):
         with self.lock:
@@ -408,15 +431,10 @@ USER_AGENT = (
 )
 
 
-def push_to_cloud(store: Store, cfg: Config, timeout: int = 15) -> dict:
+def push_to_cloud(store: Store, cfg: Config, cloud: dict, timeout: int = 15) -> dict:
     if not cfg.endpoint or not cfg.api_key:
         raise RuntimeError("Set the Worker URL and API key in the Cloud box first.")
-    device_id, device_name = store.identity()
-    payload = {
-        "device_id": device_id,
-        "device_name": device_name,
-        "days": store.days_payload(),  # full history; upsert keeps it idempotent
-    }
+    payload = cloud_sync.make_payload(store.identity(), store.totals(), cloud)
     req = urllib.request.Request(
         cfg.endpoint + "/sync",
         data=json.dumps(payload).encode("utf-8"),
@@ -428,7 +446,10 @@ def push_to_cloud(store: Store, cfg: Config, timeout: int = 15) -> dict:
         },
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        result = json.loads(resp.read().decode("utf-8"))
+        if result.get("ok") is not True or result.get("protocol") != 2:
+            raise RuntimeError("Cloud did not confirm cumulative sync.")
+        return result
 
 
 def fetch_cloud_totals(cfg: Config, timeout: int = 15) -> dict:
@@ -440,7 +461,7 @@ def fetch_cloud_totals(cfg: Config, timeout: int = 15) -> dict:
         headers={"X-API-Key": cfg.api_key, "User-Agent": USER_AGENT},
     )
     with urllib.request.urlopen(req, timeout=timeout) as resp:
-        return json.loads(resp.read().decode("utf-8"))
+        return cloud_sync.validate_cloud(json.loads(resp.read().decode("utf-8")))
 
 
 # --------------------------------------------------------------------------- #
@@ -1159,7 +1180,7 @@ class TitleBar(QWidget):
 class _Bridge(QObject):
     status = Signal(str)
     cloud_totals = Signal(object)
-    synced = Signal()
+    synced = Signal(object)
     sync_done = Signal()
     show = Signal()
     push = Signal()
@@ -1460,7 +1481,12 @@ class App(QMainWindow):
         col.addWidget(self._hline())
 
         # Words vs Tolkien  --  promoted to sit right under This device
-        col.addWidget(self._heading("Words vs. Tolkien (all-time)"))
+        self.books_heading = self._heading("Words vs. Tolkien (all-time)")
+        col.addWidget(self.books_heading)
+        self.books_basis = QLabel("")
+        self.books_basis.setObjectName("sub")
+        self.books_basis.setWordWrap(True)
+        col.addWidget(self.books_basis)
         self.books_tree = QTreeWidget()
         self.books_tree.setColumnCount(4)
         self.books_tree.setHeaderLabels(["Work", "Book total", "% written", "Words to go"])
@@ -1696,7 +1722,9 @@ class App(QMainWindow):
         self.cfg.data["endpoint"] = self.e_url.text().strip()
         self.cfg.data["api_key"] = self.e_key.text().strip()
         self.cfg.save()
-        self.set_status("Settings saved.")
+        self._update_books()
+        self.cloud_tree.clear()
+        self.set_status("Settings saved. Refresh cloud totals to confirm this connection.")
 
     def toggle_autostart(self, checked):
         try:
@@ -1718,10 +1746,12 @@ class App(QMainWindow):
             return
         self.set_status("Fetching cloud totals…")
 
+        connection = SimpleNamespace(endpoint=self.cfg.endpoint, api_key=self.cfg.api_key)
+
         def work():
             try:
-                totals = fetch_cloud_totals(self.cfg)
-                self.bridge.cloud_totals.emit(totals)
+                totals = fetch_cloud_totals(connection)
+                self.bridge.cloud_totals.emit((connection.endpoint, totals))
                 self.bridge.status.emit("Cloud totals updated.")
             except urllib.error.HTTPError as e:
                 self.bridge.status.emit(f"Fetch failed: HTTP {e.code}")
@@ -1741,16 +1771,23 @@ class App(QMainWindow):
             return
         self._sync_in_flight = True
         self.set_status("Syncing…")
+        connection = SimpleNamespace(endpoint=self.cfg.endpoint, api_key=self.cfg.api_key)
 
         def work():
             try:
                 self.store.save()
-                push_to_cloud(self.store, self.cfg)
-                totals = fetch_cloud_totals(self.cfg)
-                self.bridge.cloud_totals.emit(totals)
-                self.bridge.synced.emit()
+                # Read the current revision, then atomically replace that version.
+                cloud = fetch_cloud_totals(connection)
+                push_to_cloud(self.store, connection, cloud)
+                totals = fetch_cloud_totals(connection)
+                self.bridge.cloud_totals.emit((connection.endpoint, totals))
+                self.bridge.synced.emit(connection.endpoint)
             except urllib.error.HTTPError as e:
-                self.bridge.status.emit(f"Sync failed: HTTP {e.code}")
+                if e.code == 409:
+                    self.bridge.status.emit("Sync paused: cloud history is newer or larger. "
+                                            "Refresh totals and reconcile this installation's data.")
+                else:
+                    self.bridge.status.emit(f"Sync failed: HTTP {e.code}")
             except Exception as e:
                 self.bridge.status.emit(f"Sync failed: {e}")
             finally:
@@ -1758,7 +1795,9 @@ class App(QMainWindow):
 
         threading.Thread(target=work, daemon=True).start()
 
-    def _on_synced(self):
+    def _on_synced(self, endpoint):
+        if endpoint != self.cfg.endpoint:
+            return
         now = dt.datetime.now().strftime("%H:%M:%S")
         self.sync_lbl.setText(f"Last cloud sync: {now}")
         self.set_status("Synced.")
@@ -1768,7 +1807,16 @@ class App(QMainWindow):
         self.cfg.data["cloud_expanded"] = bool(self.cloud_section._expanded)
         self.cfg.save()
 
-    def _render_cloud(self, totals):
+    def _render_cloud(self, result):
+        endpoint, totals = result
+        if endpoint != self.cfg.endpoint:
+            return
+        try:
+            self.store.cache_cloud(endpoint, totals)
+        except ValueError as error:
+            self.set_status(str(error))
+            return
+        self._update_books()
         g = totals.get("global", {}) or {}
         devices = totals.get("devices", []) or []
         my_id = self.store.identity()[0]
@@ -1783,6 +1831,8 @@ class App(QMainWindow):
 
         for d in devices:
             name = d.get("device_name") or (d.get("device_id", "") or "")[:8]
+            if sum(1 for item in devices if item.get("device_name") == d.get("device_name")) > 1:
+                name += " [" + d.get("device_id", "")[:8] + "]"
             is_self = d.get("device_id") == my_id
             if is_self:
                 name += "  (this device)"
@@ -1791,6 +1841,8 @@ class App(QMainWindow):
                 fmt(d.get("deletions")), fmt(d.get("alt_tabs")),
                 fmt(d.get("power_cycles")),
             ])
+            it.setToolTip(0, "Installation: " + d.get("device_id", "") +
+                          "\nLast uploaded: " + str(d.get("updated_at") or "unknown"))
             for i in range(1, 1 + len(_METRIC_COLS)):
                 it.setTextAlignment(i, Qt.AlignRight | Qt.AlignVCenter)
             if is_self:
@@ -1954,8 +2006,28 @@ class App(QMainWindow):
         self._update_books()
 
     def _update_books(self):
-        typed = self.store.totals().get("words", 0)
+        configured = bool(self.cfg.endpoint and self.cfg.api_key)
+        cache = self.store.cloud_cache()
+        typed = cloud_sync.progress_words(self.store.totals().get("words", 0),
+                                          configured, self.cfg.endpoint, cache)
+        if not configured:
+            self.books_heading.setText("Words vs. Tolkien (this device)")
+            self.books_basis.setText("All-time local words. Configure cloud sync to combine installations.")
+        elif typed is None:
+            self.books_heading.setText("Words vs. Tolkien (all devices)")
+            self.books_basis.setText("Waiting for cloud totals. Your local counts are shown above.")
+        else:
+            self.books_heading.setText("Words vs. Tolkien (all devices)")
+            self.books_basis.setText(f"{typed:,} words across all installations. Last cloud refresh: "
+                                    + str(cache.get("fetched_at") or "unknown"))
         for title, count, is_agg in BOOK_WORD_COUNTS:
+            if typed is None:
+                it = self._book_items[title]
+                it.setText(2, "Pending")
+                it.setText(3, "Pending")
+                for c in range(4):
+                    it.setForeground(c, QColor(INK))
+                continue
             pct = (typed / count * 100) if count else 0.0
             left = max(0, count - typed)
             it = self._book_items[title]
@@ -2058,7 +2130,12 @@ def main():
         os.path.exists(os.path.join(app_dir(), f)) for f in ("data.json", "config.json")
     )
 
-    store = Store()
+    try:
+        store = Store()
+    except RuntimeError as error:
+        qapp = QApplication(sys.argv)
+        QMessageBox.critical(None, APP_DISPLAY_NAME, str(error))
+        return 1
     store.boot_check()
     store.save()
 
@@ -2077,4 +2154,4 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

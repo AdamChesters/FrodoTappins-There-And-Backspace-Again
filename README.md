@@ -47,7 +47,7 @@ cloud total side by side, so several machines roll into the same figures.
 This is a *counter*, not a keylogger. On each key press it increments a number
 and, to count words, it checks whether the key was a letter/digit or a
 separator — then discards that. **The actual character is never stored, written
-to disk, or transmitted.** Only the daily totals above ever leave your
+to disk, or transmitted.** Only cumulative counts (and your installation ID/name) leave your
 machine, and only when it syncs to a cloud you've set up yourself. No window
 titles, no clipboard, no key content. The source is short on purpose so you can
 verify this yourself (see `Counter._on_press` in `tracker.py`).
@@ -69,11 +69,13 @@ to uninstall.
 
 ```
 tracker.py          The local app (listener + GUI + tray + sync + autostart)
+cloud_sync.py       Cumulative sync protocol and cloud-total validation
 updater.py          GitHub release checks and portable EXE updates
 requirements.txt    Python dependencies
 build.bat           One-command build -> dist/FrodoTappins.exe
 worker.js           Cloudflare Worker (the sync API)
-schema.sql          D1 table definition (top two lines paste straight into the D1 console)
+schema.sql          D1 cumulative totals and seven-day snapshot tables
+migrate-v2.sql      Additive backfill for an existing daily-history database
 wrangler.toml       Optional — only used if you deploy via the Wrangler CLI
 ```
 
@@ -164,10 +166,6 @@ need is a free Cloudflare account and a browser. (If you'd rather use the
 Wrangler CLI, see the note at the end of this section; you can ignore
 `wrangler.toml` otherwise.)
 
-Everything you paste below is given as ready-to-paste blocks: the SQL statements
-are single lines with no `--` comments (the D1 console rejects those), and the
-Worker code is the whole `worker.js` file verbatim.
-
 Two names must match the code exactly (both case-sensitive): the database binding
 **`DB`** and the secret **`API_KEY`** — these are what `worker.js` reads via
 `env.DB` and `env.API_KEY`.
@@ -176,17 +174,10 @@ Two names must match the code exactly (both case-sensitive): the database bindin
 
 1. Dashboard → **Storage & Databases → D1 SQL Database → Create Database**. Name
    it (e.g. `frodotappins`) and create it.
-2. Open the database → **Console** (on some accounts this is behind an *Explore
-   Data* button) and paste these two statements, then run them. They are the top
-   two lines of `schema.sql` — already on single lines with no comments, exactly
-   as the console needs (one statement per line, no `--` comments):
-
-   ```sql
-   CREATE TABLE IF NOT EXISTS stats (device_id TEXT NOT NULL, device_name TEXT, day TEXT NOT NULL, keystrokes INTEGER NOT NULL DEFAULT 0, words INTEGER NOT NULL DEFAULT 0, deletions INTEGER NOT NULL DEFAULT 0, alt_tabs INTEGER NOT NULL DEFAULT 0, power_cycles INTEGER NOT NULL DEFAULT 0, updated_at TEXT, PRIMARY KEY (device_id, day));
-   ```
-   ```sql
-   CREATE INDEX IF NOT EXISTS idx_stats_day ON stats (day);
-   ```
+2. Open the database console and execute the statements in `schema.sql`.
+   This creates `device_totals`, `device_snapshots` and the snapshot-date index.
+   For an existing installation with a `stats` table, follow the upgrade steps
+   below before replacing its Worker.
 
 **b. Create the Worker**
 
@@ -221,7 +212,7 @@ machines tally into the combined total.
 
 > **Recreating or renaming the Worker?** The `DB` binding and `API_KEY` secret are
 > per-Worker and don't carry over — re-add both (each followed by a Deploy) on the
-> new Worker. A missing `DB` binding shows up as HTTP 500 on sync; a wrong/missing
+> new Worker. A missing `DB` binding shows up as HTTP 503 on sync; a wrong/missing
 > key shows up as 401; a request blocked by Cloudflare's edge shows up as 403.
 
 > Prefer the command line? `wrangler.toml` is there for the Wrangler CLI
@@ -244,33 +235,73 @@ machines tally into the combined total.
 - **Start date / days since.** The first run records a start timestamp; "days
   since" is calendar days from that date. Existing installs inherit their
   earliest recorded day as the start date when you upgrade.
-- **Per-device, per-day rows in the cloud.** Each sync sends your full local
-  day-by-day history. The Worker *upserts* by `(device_id, day)`, so re-syncing
-  a day overwrites rather than double-counts — syncing twice is harmless, and a
-  device that was offline self-heals on its next sync. The app syncs every 15
-  minutes when configured (push this device, then pull all devices) and the
-  Cloud panel lists each device's total plus a combined **Cloud total** row,
-  with this device highlighted.
+- **Cumulative cloud totals.** Each installation uploads one all-time total for
+  each counter, regardless of how long it has been running. The server checks
+  its revision and refuses stale or decreasing totals. Repeating a sync does
+  not add the same counts twice. A device offline for more than seven days can
+  still upload its complete cumulative total when it returns.
+- **Seven-day comparison history.** The cloud keeps the last accepted cumulative
+  snapshot for each installation on each UTC date, for today and six preceding
+  dates. Older snapshots are pruned on the next accepted sync; an idle database
+  retains them until then. Lifetime totals are never pruned. These snapshots
+  support manual comparison/recovery; they are not daily activity buckets or a
+  full database backup. Local daily history remains intact.
+- **Installation identity.** Keep `data.json` when updating or moving an existing
+  installation. Start a separate machine without copying that file so it gets
+  its own ID. Identical computer names do not imply duplicate counts; the cloud
+  shows an ID suffix for matching names. Unreadable saved data stops startup
+  instead of silently creating a new identity. Conflicting histories require
+  reconciliation; the app will not silently overwrite a larger cloud total.
 - **Power cycles** are detected by comparing the current OS boot time against the
   last one seen. Relaunching the app within one session does not count; only a
   real restart does. The first run records the boot time without counting it.
 - **Deletions** count every Backspace and Delete press. They are *also* counted
   as keystrokes (every physical press is one keystroke), so the deletions column
   is a subset of the keys column, not a separate total.
-- **Words vs. Tolkien** compares your **all-time** word total against fixed,
+- **Words vs. Tolkien** compares the last fetched **combined cloud all-time**
+  word total when cloud sync is configured, or your local all-time total when
+  used offline, against fixed,
   widely-cited word counts for *The Hobbit*, the three *Lord of the Rings*
   volumes (and their aggregate), and *The Silmarillion*. For each it shows the
   book's total, the percentage you've typed, and the words you have left to go;
   a finished work turns green. It's a bit of fun, not a literary measurement —
   "words" here are typing-detected word boundaries, not published wordcount
-  methodology.
+  methodology. The trilogy uses 455,125 words (177,227 + 143,436 + 134,462),
+  so finishing one volume does not mean finishing the trilogy. The panel shows
+  its source and last cloud refresh. Before the first fetch it shows Pending;
+  after a failed fetch it retains the last good cached total. Devices agree
+  when they have fetched the same cloud snapshot; unsynced typing is reflected
+  after the next push and refresh.
+
+### Upgrading an existing cloud database
+
+Back up the database and each app folder first. Apply `schema.sql`, then
+`migrate-v2.sql` to backfill cumulative totals from the existing `stats` table.
+Verify per-installation and combined sums before deploying the new `worker.js`.
+After the previous Worker requests have finished, rerun the additive backfill
+and verify again to capture any final legacy writes. Keep the original `stats`
+table as an archive during the upgrade; the new Worker no longer modifies it.
+Do not group or delete installations by computer name.
+
+Upgrade the Worker before the apps. New apps refuse to upload to the old
+protocol. Existing apps can upload full history to the new Worker during the
+transition. Rolling back the Worker after new syncs requires reconciling the
+new cumulative data; the retained legacy table alone is then out of date.
 
 ### API reference (for building your own dashboard)
 
 Both endpoints need `X-API-Key: <your key>`.
 
-- `POST /sync` → `{ "ok": true, "rows": N }`
-- `GET /totals` → `{ "global": {...}, "device_count": N, "devices": [...] }`
+- `GET /totals` → `{ "protocol": 2, "global": {...}, "device_count": N, "devices": [...] }`.
+  Each device includes its five cumulative counters and `revision`.
+- `POST /sync` accepts `protocol: 2`, `device_id`, `device_name`, `totals` (all
+  five nonnegative integer counters), and `expected_revision` from `/totals`
+  (zero for a new installation). Success returns `ok: true`, `protocol: 2`
+  and the new `revision`. HTTP 409 means stale or decreasing history: refresh
+  and reconcile before retrying. Counts must fit a JavaScript safe integer.
+- Older apps may still send their complete `days` array. The Worker collapses
+  it into cumulative totals and applies the same nondecreasing checks. Their
+  book display remains local until the app is upgraded.
 
 CORS is open, but a public browser dashboard would expose your key in client
 code — keep the key private and query `/totals` from somewhere trusted (or add a
