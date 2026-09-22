@@ -37,7 +37,7 @@ stored, or transmitted. Only counted.
 
 It is fully **portable and offline**: everything lives in the app's own folder
 (move it, copy it to a USB stick, or delete it to uninstall — see below), and it
-makes no network connections unless you set up cloud sync yourself. It runs in
+makes no network connections unless you set up cloud sync or use the optional GitHub update checks. It runs in
 the system tray and can start at login. With cloud sync configured it **auto-syncs
 every 15 minutes** (and on demand), showing each device's total and the combined
 cloud total side by side, so several machines roll into the same figures.
@@ -68,7 +68,8 @@ to uninstall.
 ## Files
 
 ```
-tracker.py          The whole local app (listener + GUI + tray + sync + autostart)
+tracker.py          The local app (listener + GUI + tray + sync + autostart)
+updater.py          GitHub release checks and portable EXE updates
 requirements.txt    Python dependencies
 build.bat           One-command build -> dist/FrodoTappins.exe
 worker.js           Cloudflare Worker (the sync API)
@@ -93,6 +94,39 @@ window appears showing today's figures and your all-time totals.
 
 > Prefer to just run it without building? `pip install -r requirements.txt`
 > then `python tracker.py`.
+
+### Updating the portable app
+
+The **Updates** section shows the installed version. Choose **Check GitHub**
+to look for a newer stable release. **Check GitHub for updates at startup**
+is optional and starts disabled, so offline use remains available.
+
+When a compatible release is found, **Download and restart** downloads it,
+checks its size and SHA-256 against GitHub's release metadata, saves your counts,
+replaces the EXE and restarts the app. You can cancel before installation.
+The controls use the same wood and parchment styling as the rest of the app.
+
+Updates replace only the EXE. Keep using the same app folder: `data.json`,
+`config.json`, your device ID, counts and cloud settings stay in place. An older
+EXE is kept as `previous.exe` inside an adjacent `.FrodoTappins-update-*` folder.
+If replacement or launch fails, the helper attempts to restore that backup.
+Successful launch is not a guarantee that a new version has no bugs; keep the
+backup until you are happy with the update.
+
+In-app installation requires the packaged Windows EXE and a writable folder.
+A release without a verifiable standalone `FrodoTappins.exe` is offered through
+**Releases** for manual download instead. Older releases without the updater
+need one manual upgrade: close the old app and replace its EXE in the existing
+folder, preserving both JSON files.
+
+GitHub checks send no counts, device IDs or cloud credentials. They do make
+ordinary HTTPS requests to GitHub. The checksum verifies the download against
+GitHub metadata; it is not an independent publisher signature.
+
+For release packages, attach the `dist/FrodoTappins.exe` produced by `build.bat`
+as a standalone GitHub release asset named `FrodoTappins.exe`, alongside the ZIP.
+Set `VERSION` in `updater.py` to the corresponding stable tag version before
+building. Drafts, prereleases, equal and older versions are not offered.
 
 ### Where your data lives (portable)
 
@@ -259,7 +293,7 @@ separate read-only endpoint if you want a public view).
   followed by a separator, which matches normal typing well but won't reflect
   IME / CJK composition precisely.
 - **Auto-sync runs every 15 minutes** whenever a Worker URL and key are set, and
-  only then — with no cloud configured the app makes no network calls at all.
+  only then — cloud sync makes no network calls without cloud configuration. GitHub update checks are separate and optional.
   Use the "Auto-sync to cloud every 15 min" checkbox to turn it off; "Push to
   Cloud" (push + pull) and "Refresh total" (pull only) remain for on-demand use.
 - Built and tested against the structure of `pynput`/`psutil`/`PySide6` (the Qt

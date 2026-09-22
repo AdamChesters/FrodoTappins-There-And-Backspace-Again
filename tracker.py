@@ -18,6 +18,13 @@ window titles are ever stored or sent anywhere.
 
 import os
 import sys
+from pathlib import Path
+import updater
+
+# The replacement helper must never start a second keyboard counter or GUI.
+if __name__ == "__main__" and "--apply-update" in sys.argv:
+    sys.exit(updater.apply_update(sys.argv[sys.argv.index("--apply-update") + 1]))
+
 import json
 import uuid
 import socket
@@ -1157,6 +1164,10 @@ class _Bridge(QObject):
     show = Signal()
     push = Signal()
     quit = Signal()
+    update_checked = Signal(object)
+    update_prepared = Signal(object)
+    update_error = Signal(str)
+    update_progress = Signal(int)
 
 
 # Column model shared by the device + cloud tables.
@@ -1288,6 +1299,9 @@ class App(QMainWindow):
         self.cfg = cfg
         self.running = True
         self._sync_in_flight = False
+        self._update_busy = False
+        self._update_cancel = threading.Event()
+        self._available_update = None
         self.tray = None
         self._first_run = first_run
         self._writable = writable
@@ -1300,6 +1314,11 @@ class App(QMainWindow):
         self.bridge.show.connect(self.show_window)
         self.bridge.push.connect(self.on_push)
         self.bridge.quit.connect(self.quit_app)
+        self.bridge.update_checked.connect(self._update_checked)
+        self.bridge.update_prepared.connect(self._update_prepared)
+        self.bridge.update_error.connect(self._update_failed)
+        self.bridge.update_progress.connect(
+            lambda value: self.update_label.setText(f"Downloading update: {value}%"))
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.setWindowIcon(self._app_icon())
@@ -1331,6 +1350,8 @@ class App(QMainWindow):
         self._tick();             self._tick_timer = self._every(1000, self._tick)
         self._autosave();         self._save_timer = self._every(5000, self._autosave)
         QTimer.singleShot(INITIAL_SYNC_MS, self._autosync)
+        if self.cfg.data.get("check_updates", False):
+            QTimer.singleShot(2000, self.check_updates)
 
         if start_minimized and HAVE_TRAY:
             QTimer.singleShot(0, self.hide)
@@ -1511,6 +1532,37 @@ class App(QMainWindow):
         self.autosync_chk.toggled.connect(self.toggle_autosync)
         cloud.addWidget(self.autosync_chk)
 
+        col.addWidget(self._hline())
+
+        # Update controls inherit the wood buttons and parchment app styling.
+        col.addWidget(self._heading("Updates"))
+        self.update_label = QLabel(f"Version {updater.VERSION}")
+        self.update_label.setWordWrap(True)
+        col.addWidget(self.update_label)
+        update_row = QHBoxLayout()
+        self.update_check_btn = QPushButton("Check GitHub")
+        self.update_check_btn.clicked.connect(self.check_updates)
+        self.update_install_btn = QPushButton("Download and restart")
+        self.update_install_btn.setEnabled(False)
+        self.update_install_btn.clicked.connect(self.install_update)
+        self.update_cancel_btn = QPushButton("Cancel")
+        self.update_cancel_btn.setEnabled(False)
+        self.update_cancel_btn.clicked.connect(self._cancel_update)
+        releases_btn = QPushButton("Releases")
+        releases_btn.clicked.connect(self.open_releases)
+        for button in (self.update_check_btn, self.update_install_btn,
+                       self.update_cancel_btn, releases_btn):
+            update_row.addWidget(button)
+        col.addLayout(update_row)
+        self.update_startup_chk = QCheckBox("Check GitHub for updates at startup")
+        self.update_startup_chk.setChecked(bool(self.cfg.data.get("check_updates", False)))
+        self.update_startup_chk.toggled.connect(self._save_update_preference)
+        col.addWidget(self.update_startup_chk)
+        update_note = QLabel("Download and restart installs the update automatically. "
+                            "Your counts and cloud settings stay in this folder.")
+        update_note.setObjectName("sub")
+        update_note.setWordWrap(True)
+        col.addWidget(update_note)
         col.addWidget(self._hline())
 
         # install / data location
@@ -1771,6 +1823,120 @@ class App(QMainWindow):
         else:
             self.set_status("Auto-sync off.")
 
+    # -- GitHub updates ----------------------------------------------------- #
+    def open_releases(self):
+        import webbrowser
+        webbrowser.open(updater.RELEASES_URL)
+
+    def _save_update_preference(self, enabled):
+        self.cfg.data["check_updates"] = enabled
+        self.cfg.save()
+
+    def _update_controls(self, busy):
+        self._update_busy = busy
+        self.update_check_btn.setEnabled(not busy)
+        self.update_install_btn.setEnabled(
+            not busy and bool(self._available_update and self._available_update["asset"])
+            and os.name == "nt" and bool(getattr(sys, "frozen", False)))
+        self.update_cancel_btn.setEnabled(False)
+
+    def check_updates(self):
+        if self._update_busy or not self.running:
+            return
+        self._update_controls(True)
+        self.update_label.setText("Checking GitHub...")
+        def work():
+            try:
+                self.bridge.update_checked.emit(updater.check_release())
+            except Exception:
+                self.bridge.update_error.emit("Could not check GitHub. Check your connection and retry.")
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_checked(self, release):
+        if not self.running:
+            return
+        self._available_update = release
+        self._update_controls(False)
+        if release is None:
+            self.update_label.setText(f"Version {updater.VERSION} is up to date.")
+        elif not release["asset"]:
+            self.update_label.setText(f"Version {release['tag']} is available. "
+                                      "Open Releases for a manual download.")
+        elif not getattr(sys, "frozen", False) or os.name != "nt":
+            self.update_label.setText(f"Version {release['tag']} is available. "
+                                      "Run the Windows EXE to install updates here.")
+        else:
+            self.update_label.setText(f"Version {release['tag']} is ready to download.")
+
+    def _cancel_update(self):
+        self._update_cancel.set()
+        self.update_cancel_btn.setEnabled(False)
+        self.update_label.setText("Cancelling update...")
+
+    def install_update(self):
+        if self._update_busy or not self._available_update:
+            return
+        self._update_controls(True)
+        self._update_cancel.clear()
+        self.update_cancel_btn.setEnabled(True)
+        self.update_label.setText("Downloading update...")
+        release = self._available_update
+        def work():
+            stage = None
+            helper = None
+            try:
+                stage = updater.download_release(release, Path(sys.executable).resolve(),
+                                                self._update_cancel,
+                                                self.bridge.update_progress.emit)
+                helper = updater.start_helper(stage, Path(sys.executable), release["asset"])
+                if self._update_cancel.is_set():
+                    raise RuntimeError("Update cancelled.")
+                self.bridge.update_prepared.emit((stage, helper))
+            except Exception as error:
+                if helper is not None:
+                    helper.terminate()
+                    helper.wait(timeout=15)
+                if stage is not None:
+                    import shutil
+                    shutil.rmtree(stage, ignore_errors=True)
+                self.bridge.update_error.emit(str(error))
+        threading.Thread(target=work, daemon=True).start()
+
+    def _update_failed(self, message):
+        if not self.running:
+            return
+        self._update_controls(False)
+        self.update_label.setText(message)
+
+    def _update_prepared(self, prepared):
+        stage, helper = prepared
+        if self._update_cancel.is_set() or not self.running:
+            helper.terminate()
+            self._update_failed("Update cancelled.")
+            return
+        if helper.poll() is not None:
+            self._update_failed("Update helper stopped. Your app is unchanged; retry the update.")
+            return
+        if self._sync_in_flight:
+            self.update_label.setText("Update ready. Waiting for cloud sync to finish...")
+            QTimer.singleShot(500, lambda: self._update_prepared(prepared))
+            return
+        try:
+            self.counter.stop()
+            if self.counter.listener:
+                self.counter.listener.join(timeout=5)
+                if self.counter.listener.is_alive():
+                    raise RuntimeError("Keyboard counter is still stopping. Retry the update.")
+            self.store.save()
+            (stage / "install").touch()
+        except Exception:
+            helper.terminate()
+            if not self.counter.listener or not self.counter.listener.is_alive():
+                self.counter.start()
+            self._update_failed("Could not safely save your counts. Update cancelled; check folder access.")
+            return
+        self.quit_app()
+
     # -- periodic loops ----------------------------------------------------- #
     def _tick(self):
         n = self.store.days_since()
@@ -1860,6 +2026,7 @@ class App(QMainWindow):
         self.activateWindow()
 
     def quit_app(self):
+        self._update_cancel.set()
         self.running = False
         try:
             self.counter.stop()
