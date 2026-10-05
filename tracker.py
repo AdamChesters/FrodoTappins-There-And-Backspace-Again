@@ -39,6 +39,7 @@ import urllib.request
 import urllib.error
 
 import math
+import support_ui
 
 import psutil
 from pynput import keyboard
@@ -1391,6 +1392,13 @@ class App(QMainWindow):
         t.start(ms)
         return t
 
+    def open_support(self):
+        if self.support_dialog is None:
+            self.support_dialog = support_ui.SupportDialog(self)
+        self.support_dialog.show()
+        self.support_dialog.raise_()
+        self.support_dialog.activateWindow()
+
     def _app_icon(self):
         pm = QPixmap(64, 64)
         pm.fill(QColor(WOOD_DEEP))
@@ -1447,6 +1455,12 @@ class App(QMainWindow):
         # custom wood title bar (replaces the grey OS title bar)
         self.titlebar = TitleBar(self, APP_DISPLAY_NAME)
         outer.addWidget(self.titlebar)
+
+        self.support_dialog = None
+        self.support_button = QPushButton("Feedback / Donate")
+        self.support_button.setMinimumHeight(44)
+        self.support_button.clicked.connect(self.open_support)
+        outer.addWidget(self.support_button)
 
         # scrollable content, inset so vines have a clear band around the edges
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
