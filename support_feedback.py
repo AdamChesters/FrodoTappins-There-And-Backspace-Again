@@ -6,7 +6,7 @@ import urllib.request
 import updater
 
 APP_ID = 'FrodoTappins-There-And-Backspace-Again'
-FEEDBACK_URL = ''  # Set to the shared public relay before packaging a release.
+FEEDBACK_URL = 'https://adamch-app-feedback.adam-chesters.workers.dev/feedback'
 PAYPAL_URL = "https://www.paypal.com/donate/?business=KLHSZPXTSVSAU&no_recurring=0&item_name=I%27ve+donated+to+lots+of+small+creators+for+their+useful+little+tools%2C+now+I+create+them.+Dig+one?+I%27d+love+your+support.&currency_code=AUD"
 
 
