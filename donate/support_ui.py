@@ -8,6 +8,13 @@ from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QPushButton, QVBoxLayou
 from . import support_feedback as feedback
 from .content import CONTENT
 
+_SUPPORT_STYLE = """
+QDialog, QScrollArea, QScrollArea QWidget { background-color: #241b16; }
+QLabel { color: #f1e5ce; }
+QLineEdit, QTextEdit { background-color: #1a120d; color: #f1e5ce;
+    border: 1px solid #806644; padding: 6px; }
+"""
+
 
 class FeedbackDialog(QDialog):
     finished_send = Signal(str)
@@ -16,6 +23,7 @@ class FeedbackDialog(QDialog):
         super().__init__(app)
         self.app = app
         self.identity = identity
+        self.setStyleSheet(app.styleSheet() + _SUPPORT_STYLE)
         self.setWindowTitle(CONTENT['feedback']['title'])
         self.resize(560, 520)
         self.busy = False
@@ -78,6 +86,7 @@ class SupportDialog(QDialog):
         super().__init__(app)
         self.app = app
         self.identity = identity
+        self.setStyleSheet(app.styleSheet() + _SUPPORT_STYLE)
         self.feedback_dialog = None
         self.setWindowTitle(CONTENT['title'])
         self.resize(620, 660)
