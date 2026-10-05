@@ -39,7 +39,8 @@ import urllib.request
 import urllib.error
 
 import math
-import support_ui
+from donate import support_ui
+from donate.content import SupportIdentity
 
 import psutil
 from pynput import keyboard
@@ -1394,7 +1395,7 @@ class App(QMainWindow):
 
     def open_support(self):
         if self.support_dialog is None:
-            self.support_dialog = support_ui.SupportDialog(self)
+            self.support_dialog = support_ui.SupportDialog(self, SupportIdentity(APP_DISPLAY_NAME, self.windowIcon(), updater.VERSION, "FrodoTappins-There-And-Backspace-Again", self.check_updates))
         self.support_dialog.show()
         self.support_dialog.raise_()
         self.support_dialog.activateWindow()

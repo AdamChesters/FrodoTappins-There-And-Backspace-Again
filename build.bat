@@ -15,6 +15,7 @@ REM The GUI is PySide6 (Qt); PyInstaller's bundled Qt hook pulls in what's
 REM needed. We exclude the heavy Qt modules the app never touches (WebEngine,
 REM multimedia, 3D, QML, etc.) so the single-file exe stays as small as it can.
 python -m PyInstaller --onefile --noconsole --name FrodoTappins ^
+  --add-data "donate;donate" ^
   --exclude-module PySide6.QtWebEngineCore ^
   --exclude-module PySide6.QtWebEngineWidgets ^
   --exclude-module PySide6.QtWebEngineQuick ^
