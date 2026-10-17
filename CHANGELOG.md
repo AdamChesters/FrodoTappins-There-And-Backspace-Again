@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.1
+
+- Refreshed the Feedback / Support panel: Discord, Reddit, GitHub, LinkedIn and AdamCh.com buttons, "Check for updates" and "Feedback form" side by side, and updated support wording and links.
+- The main window button is now labelled Feedback / Support.
+
 ## 0.3.0
 
 - Added a prominent Feedback / Donate button with the FrodoTappins support panel, Discord invite and donation options.

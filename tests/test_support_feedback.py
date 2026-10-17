@@ -43,3 +43,19 @@ class FeedbackTests(unittest.TestCase):
         with patch.object(feedback, 'FEEDBACK_URL', ''):
             with self.assertRaises(ValueError):
                 feedback.send({})
+
+
+class SupportContentTests(unittest.TestCase):
+    def test_bundled_component_has_socials_and_support_wording(self):
+        from pathlib import Path
+        from donate.content import CONTENT
+        root = Path(feedback.__file__).parent
+        manifest = json.loads((root / 'manifest.json').read_text(encoding='utf-8'))
+        self.assertEqual((manifest['version'], CONTENT['schemaVersion']), ('2.0.0', 2))
+        self.assertEqual([s['id'] for s in CONTENT['socials']], ['discord', 'reddit', 'github', 'linkedin', 'website'])
+        self.assertEqual(len(CONTENT['platforms']), 3)
+        for item in CONTENT['socials'] + CONTENT['platforms']:
+            self.assertTrue(item['url'].startswith('https://'))
+            self.assertTrue((root / item['icon']).is_file(), item['icon'])
+        visible = [CONTENT['title'], CONTENT['donationTitle']] + [p['label'] for p in CONTENT['platforms']]
+        self.assertFalse(any('donate' in text.lower() for text in visible))

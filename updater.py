@@ -16,7 +16,7 @@ import time
 import urllib.parse
 import urllib.request
 
-VERSION = "0.3.0"
+VERSION = "0.3.1"
 REPOSITORY = "AdamChesters/FrodoTappins-There-And-Backspace-Again"
 RELEASES_URL = f"https://github.com/{REPOSITORY}/releases"
 API_URL = f"https://api.github.com/repos/{REPOSITORY}/releases?per_page=100"

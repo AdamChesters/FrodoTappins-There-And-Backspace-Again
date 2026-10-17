@@ -2,7 +2,10 @@
 import threading
 import webbrowser
 
-from PySide6.QtCore import Qt, Signal, QTimer
+from pathlib import Path
+
+from PySide6.QtCore import Qt, Signal, QTimer, QSize
+from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (QDialog, QWidget, QLabel, QPushButton, QVBoxLayout,
                                QHBoxLayout, QLineEdit, QTextEdit, QScrollArea)
 from . import support_feedback as feedback
@@ -93,7 +96,7 @@ class SupportDialog(QDialog):
         outer = QVBoxLayout(self)
         scroll = QScrollArea(); scroll.setWidgetResizable(True); outer.addWidget(scroll)
         page = QWidget(); scroll.setWidget(page)
-        col = QVBoxLayout(page); col.setSpacing(16)
+        col = QVBoxLayout(page); col.setSpacing(8)
         logo = QLabel(); logo.setPixmap(identity.appLogo.pixmap(72, 72)); logo.setAlignment(Qt.AlignCenter)
         col.addWidget(logo)
         title = QLabel(identity.appName); title.setAlignment(Qt.AlignCenter)
@@ -105,19 +108,24 @@ class SupportDialog(QDialog):
         self.update_timer.timeout.connect(self.refresh_update_status)
         self.update_timer.start(250)
         actions = QHBoxLayout(); col.addLayout(actions)
-        for text, action in [(CONTENT['actions']['discord'], lambda: webbrowser.open(CONTENT['links']['discord'])),
-                             (CONTENT['actions']['update'], identity.checkForUpdates), (CONTENT['actions']['feedback'], self.open_feedback)]:
+        actions.addStretch()
+        for text, action in [(CONTENT['actions']['update'], identity.checkForUpdates), (CONTENT['actions']['feedback'], self.open_feedback)]:
             button = QPushButton(text); button.setMinimumHeight(44); button.clicked.connect(action); actions.addWidget(button)
+        actions.addStretch()
+        socials = QHBoxLayout(); socials.setSpacing(8); col.addLayout(socials)
+        socials.addStretch()
+        for social in CONTENT['socials']:
+            button = QPushButton(); button.setFixedSize(38, 38)
+            button.setIcon(QIcon(str(Path(__file__).parent / social['icon']))); button.setIconSize(QSize(19, 19))
+            button.setToolTip(social['label']); button.setAccessibleName(social['label'])
+            button.setStyleSheet(f"QPushButton {{ background: {social['color']}; border: 1px solid {social['color']}; border-radius: 8px; padding: 0; }}")
+            button.clicked.connect(lambda checked=False, url=social['url']: webbrowser.open(url)); socials.addWidget(button)
+        socials.addStretch()
         def paragraph(text):
             label = QLabel(text); label.setWordWrap(True); col.addWidget(label); return label
         paragraph(CONTENT['intro'].replace('{appName}', identity.appName))
-        paragraph(CONTENT['projectsText'])
-        projects = QHBoxLayout(); col.addLayout(projects)
-        for label, url in [('GitHub', CONTENT['links']['github']), ('AdamCh.com', CONTENT['links']['website'])]:
-            button = QPushButton(label); button.setMinimumHeight(44)
-            button.clicked.connect(lambda checked=False, url=url: webbrowser.open(url)); projects.addWidget(button)
         heading = paragraph(CONTENT['donationTitle']); heading.setAlignment(Qt.AlignCenter)
-        heading.setStyleSheet('font-size: 22px; font-weight: bold;')
+        heading.setStyleSheet('font-size: 20px; font-weight: bold; margin-top: 6px;')
         paragraph(CONTENT['donationText'])
         donations = QHBoxLayout(); col.addLayout(donations)
         styles = {'github': 'background: #24292f; color: white;',
@@ -126,8 +134,8 @@ class SupportDialog(QDialog):
         for platform in CONTENT['platforms']:
             label, url = platform['label'], platform['url']
             note, style = '\n'.join(platform['notes']), styles[platform['id']]
-            item = QVBoxLayout(); donations.addLayout(item)
-            button = QPushButton(label); button.setMinimumHeight(64); button.setStyleSheet(style)
+            item = QVBoxLayout(); item.setSpacing(4); donations.addLayout(item, 1)
+            button = QPushButton(label); button.setMinimumHeight(44); button.setStyleSheet(style)
             button.clicked.connect(lambda checked=False, url=url: webbrowser.open(url)); item.addWidget(button)
             note_label = QLabel(note); note_label.setWordWrap(True); note_label.setAlignment(Qt.AlignCenter); item.addWidget(note_label)
         close = QPushButton('Close'); close.setMinimumHeight(44); close.clicked.connect(self.close); outer.addWidget(close)

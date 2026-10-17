@@ -40,7 +40,7 @@ import urllib.error
 
 import math
 from donate import support_ui
-from donate.content import SupportIdentity
+from donate.content import CONTENT as SUPPORT_CONTENT, SupportIdentity
 
 import psutil
 from pynput import keyboard
@@ -1458,7 +1458,7 @@ class App(QMainWindow):
         outer.addWidget(self.titlebar)
 
         self.support_dialog = None
-        self.support_button = QPushButton("Feedback / Donate")
+        self.support_button = QPushButton(SUPPORT_CONTENT['title'])
         self.support_button.setMinimumHeight(44)
         self.support_button.clicked.connect(self.open_support)
         outer.addWidget(self.support_button)

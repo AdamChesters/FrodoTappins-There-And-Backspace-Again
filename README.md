@@ -37,7 +37,7 @@ stored, or transmitted. Only counted.
 
 It is fully **portable and offline**: everything lives in the app's own folder
 (move it, copy it to a USB stick, or delete it to uninstall — see below), and it
-makes no network connections unless you set up cloud sync or use the optional GitHub update checks. It runs in
+makes no network connections unless you set up cloud sync, use the optional GitHub update checks or send feedback. It runs in
 the system tray and can start at login. With cloud sync configured it **auto-syncs
 every 15 minutes** (and on demand), showing each device's total and the combined
 cloud total side by side, so several machines roll into the same figures.
