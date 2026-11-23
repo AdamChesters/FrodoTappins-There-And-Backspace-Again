@@ -103,10 +103,16 @@ The **Updates** section shows the installed version. Choose **Check GitHub**
 to look for a newer stable release. **Check GitHub for updates at startup**
 is optional and starts disabled, so offline use remains available.
 
+The **Feedback / Support** button in the title bar opens the About panel, which
+shows the same version and update status. Its **Check for updates** button
+becomes **Download** when a release is found and **Cancel** while it downloads.
+The title bar button reads **Update available** when a check finds a release.
+
 When a compatible release is found, **Download and restart** downloads it,
 checks its size and SHA-256 against GitHub's release metadata, saves your counts,
 replaces the EXE and restarts the app. You can cancel before installation.
-The controls use the same wood and parchment styling as the rest of the app.
+The controls and the About panel use the same wood, vine and parchment styling
+as the rest of the app.
 
 Updates replace only the EXE. Keep using the same app folder: `data.json`,
 `config.json`, your device ID, counts and cloud settings stay in place. An older

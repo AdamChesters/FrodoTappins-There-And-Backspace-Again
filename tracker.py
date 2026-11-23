@@ -1079,6 +1079,18 @@ class WoodPanel(QWidget):
             QPainter(self).drawImage(0, 0, self._tex)
 
 
+class VinePanel(WoodPanel):
+    """Burl wood framed by the vine wreath: the main window's look for a dialog."""
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.border = VineBorder(self)
+
+    def resizeEvent(self, e):
+        self.border.setGeometry(self.rect())
+        self.border.raise_()
+        super().resizeEvent(e)
+
+
 # --------------------------------------------------------------------------- #
 # A collapsible section: a clickable wood header with a disclosure triangle and
 # a body widget that hides/shows. Used to fold the Cloud block away.
@@ -1125,7 +1137,8 @@ class CollapsibleSection(QWidget):
 # bar carries the icon + title, the minimise / close buttons, and window-drag.
 # --------------------------------------------------------------------------- #
 class TitleBar(QWidget):
-    def __init__(self, win, title):
+    def __init__(self, win, title, icon, action=None, minimise=True,
+                 close_tip="Close to tray"):
         super().__init__(win)
         self._win = win
         self._drag = None
@@ -1134,20 +1147,26 @@ class TitleBar(QWidget):
         h = QHBoxLayout(self); h.setContentsMargins(10, 0, 6, 0); h.setSpacing(8)
 
         self.icon = QLabel(); self.icon.setObjectName("titleicon")
-        self.icon.setPixmap(win._app_icon().pixmap(18, 18))
+        self.icon.setPixmap(icon.pixmap(18, 18))
         h.addWidget(self.icon)
 
         self.label = QLabel(title); self.label.setObjectName("titletext")
-        h.addWidget(self.label)
-        h.addStretch(1)
+        # A long title gives way (clipped) rather than forcing the window wider.
+        self.label.setMinimumWidth(0)
+        self.label.setSizePolicy(QSizePolicy.Ignored, QSizePolicy.Preferred)
+        h.addWidget(self.label, 1)
 
-        self.btn_min = QToolButton(); self.btn_min.setObjectName("winbtn")
-        self.btn_min.setText("–"); self.btn_min.setToolTip("Minimise")
-        self.btn_min.clicked.connect(win.showMinimized)
-        h.addWidget(self.btn_min)
+        if action is not None:
+            h.addWidget(action)
+
+        if minimise:
+            self.btn_min = QToolButton(); self.btn_min.setObjectName("winbtn")
+            self.btn_min.setText("–"); self.btn_min.setToolTip("Minimise")
+            self.btn_min.clicked.connect(win.showMinimized)
+            h.addWidget(self.btn_min)
 
         self.btn_close = QToolButton(); self.btn_close.setObjectName("winbtnclose")
-        self.btn_close.setText("✕"); self.btn_close.setToolTip("Close to tray")
+        self.btn_close.setText("✕"); self.btn_close.setToolTip(close_tip)
         self.btn_close.clicked.connect(win.close)
         h.addWidget(self.btn_close)
 
@@ -1257,6 +1276,11 @@ def _qss():
         color: {AMBER}; background: transparent; border: none;
         border-radius: 4px; min-width: 26px; min-height: 22px; font-size: 12pt;
     }}
+    QPushButton#titleaction {{
+        border: 1px solid {AMBER_DIM}; border-radius: 4px; padding: 2px 10px;
+        font-weight: bold;
+    }}
+    QPushButton#titleaction:hover {{ border: 1px solid {AMBER}; }}
     QToolButton#winbtn:hover {{ background: {WOOD_MID}; color: {PARCHMENT}; }}
     QToolButton#winbtnclose:hover {{ background: #7a2f22; color: {PARCHMENT}; }}
     /* collapsible section header */
@@ -1272,7 +1296,7 @@ def _qss():
         border-radius: 8px;
     }}
     QFrame[hline="true"] {{ background: {WOOD_MID}; max-height: 1px; border: none; }}
-    QLineEdit {{
+    QLineEdit, QTextEdit {{
         background: {PARCHMENT}; color: {INK}; border: 1px solid {WOOD_MID};
         border-radius: 4px; padding: 4px 6px; selection-background-color: {AMBER_DIM};
     }}
@@ -1282,6 +1306,13 @@ def _qss():
     }}
     QPushButton:hover {{ background: {WOOD_LIGHT}; color: {PARCHMENT}; }}
     QPushButton:pressed {{ background: {WOOD_DARK}; }}
+    QPushButton:disabled {{ color: {INK_SOFT}; border: 1px solid {WOOD_MID}; }}
+    /* About / Support and feedback dialogs (widgets named by donate/) */
+    QDialog {{ background: {WOOD_DEEP}; }}
+    QLabel#supportTitle {{ font-size: 16pt; font-weight: bold; }}
+    QLabel#supportHeading {{ font-size: 14pt; font-weight: bold; margin-top: 6px; }}
+    QLabel#supportText {{ color: {PARCHMENT}; }}
+    QLabel#supportNote {{ color: {AMBER_DIM}; font-size: 8pt; }}
     QCheckBox {{ color: {AMBER}; background: transparent; spacing: 6px; }}
     QCheckBox::indicator {{
         width: 17px; height: 17px; border: 1px solid {WOOD_LIGHT};
@@ -1341,7 +1372,7 @@ class App(QMainWindow):
         self.bridge.update_prepared.connect(self._update_prepared)
         self.bridge.update_error.connect(self._update_failed)
         self.bridge.update_progress.connect(
-            lambda value: self.update_label.setText(f"Downloading update: {value}%"))
+            lambda value: self._set_update_status(f"Downloading update: {value}%"))
 
         self.setWindowTitle(APP_DISPLAY_NAME)
         self.setWindowIcon(self._app_icon())
@@ -1395,10 +1426,30 @@ class App(QMainWindow):
 
     def open_support(self):
         if self.support_dialog is None:
-            self.support_dialog = support_ui.SupportDialog(self, SupportIdentity(APP_DISPLAY_NAME, self.windowIcon(), updater.VERSION, "FrodoTappins-There-And-Backspace-Again", self.check_updates))
+            self.support_dialog = support_ui.SupportDialog(self, SupportIdentity(
+                APP_DISPLAY_NAME, self.windowIcon(), updater.VERSION,
+                "FrodoTappins-There-And-Backspace-Again", self._update_action,
+                cancelUpdate=self._cancel_update, frame=self._wood_frame))
+            self._show_update_state()
         self.support_dialog.show()
         self.support_dialog.raise_()
         self.support_dialog.activateWindow()
+
+    def _wood_frame(self, dialog, title):
+        """Dress a support dialog like the main window: frameless, wood title
+        bar, burl panel and vine wreath. Returns the layout for its content."""
+        dialog.setWindowFlag(Qt.FramelessWindowHint, True)
+        dialog.resize(dialog.width() + 90, dialog.height() + 130)  # room for the frame
+        outer = QVBoxLayout(dialog); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
+        outer.addWidget(TitleBar(dialog, title, self.windowIcon(), minimise=False,
+                                 close_tip="Close"))
+        panel = VinePanel(); panel.setObjectName("root")
+        outer.addWidget(panel, 1)
+        content = QVBoxLayout(panel)
+        # Same inset as the main page, clear of the vine band.
+        content.setContentsMargins(58, 64, 58, 60)
+        content.setSpacing(8)
+        return content
 
     def _app_icon(self):
         pm = QPixmap(64, 64)
@@ -1454,14 +1505,14 @@ class App(QMainWindow):
         outer = QVBoxLayout(root); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
 
         # custom wood title bar (replaces the grey OS title bar)
-        self.titlebar = TitleBar(self, APP_DISPLAY_NAME)
-        outer.addWidget(self.titlebar)
-
+        # It also carries the Feedback / Support button, clear of the vines.
         self.support_dialog = None
         self.support_button = QPushButton(SUPPORT_CONTENT['title'])
-        self.support_button.setMinimumHeight(44)
+        self.support_button.setObjectName("titleaction")
         self.support_button.clicked.connect(self.open_support)
-        outer.addWidget(self.support_button)
+        self.titlebar = TitleBar(self, APP_DISPLAY_NAME, self.windowIcon(),
+                                 action=self.support_button)
+        outer.addWidget(self.titlebar)
 
         # scrollable content, inset so vines have a clear band around the edges
         scroll = QScrollArea(); scroll.setWidgetResizable(True)
@@ -1577,6 +1628,7 @@ class App(QMainWindow):
 
         # Update controls inherit the wood buttons and parchment app styling.
         col.addWidget(self._heading("Updates"))
+        self._update_status = ""
         self.update_label = QLabel(f"Version {updater.VERSION}")
         self.update_label.setWordWrap(True)
         col.addWidget(self.update_label)
@@ -1680,6 +1732,10 @@ class App(QMainWindow):
 
     def eventFilter(self, obj, event):
         et = event.type()
+        # Other windows (the support dialogs) can overlap this one's edges.
+        owner = obj.window() if isinstance(obj, QWidget) else obj
+        if owner is not self and owner is not self.windowHandle():
+            return super().eventFilter(obj, event)
         if et in (QEvent.MouseMove, QEvent.MouseButtonPress,
                   QEvent.HoverMove) and not self.isMaximized():
             # global position -> this window's local coords
@@ -1899,6 +1955,33 @@ class App(QMainWindow):
         self.cfg.data["check_updates"] = enabled
         self.cfg.save()
 
+    def _set_update_status(self, text):
+        self._update_status = text
+        self.update_label.setText(f"Version {updater.VERSION} - {text}")
+        self._show_update_state()
+
+    def _show_update_state(self):
+        """Mirror the update state onto the title bar button and the dialog."""
+        release = self._available_update
+        self.support_button.setText("Update available" if release
+                                    else SUPPORT_CONTENT['title'])
+        if self.support_dialog is not None:
+            available = ""
+            if release and not self._update_busy:
+                available = release["tag"] + (
+                    " and restart" if self.update_install_btn.isEnabled() else "")
+            self.support_dialog.set_update(self._update_status, self._update_busy,
+                                           available, self.update_cancel_btn.isEnabled())
+
+    def _update_action(self):
+        """The dialog's update button: install, open Releases, or check."""
+        if self.update_install_btn.isEnabled():
+            self.install_update()
+        elif self._available_update:
+            self.open_releases()
+        else:
+            self.check_updates()
+
     def _update_controls(self, busy):
         self._update_busy = busy
         self.update_check_btn.setEnabled(not busy)
@@ -1911,7 +1994,7 @@ class App(QMainWindow):
         if self._update_busy or not self.running:
             return
         self._update_controls(True)
-        self.update_label.setText("Checking GitHub...")
+        self._set_update_status("Checking GitHub...")
         def work():
             try:
                 self.bridge.update_checked.emit(updater.check_release())
@@ -1925,20 +2008,20 @@ class App(QMainWindow):
         self._available_update = release
         self._update_controls(False)
         if release is None:
-            self.update_label.setText(f"Version {updater.VERSION} is up to date.")
+            self._set_update_status("Up to date.")
         elif not release["asset"]:
-            self.update_label.setText(f"Version {release['tag']} is available. "
-                                      "Open Releases for a manual download.")
+            self._set_update_status(f"{release['tag']} is available. "
+                                    "Open Releases for a manual download.")
         elif not getattr(sys, "frozen", False) or os.name != "nt":
-            self.update_label.setText(f"Version {release['tag']} is available. "
-                                      "Run the Windows EXE to install updates here.")
+            self._set_update_status(f"{release['tag']} is available. "
+                                    "Run the Windows EXE to install updates here.")
         else:
-            self.update_label.setText(f"Version {release['tag']} is ready to download.")
+            self._set_update_status(f"{release['tag']} is ready to download.")
 
     def _cancel_update(self):
         self._update_cancel.set()
         self.update_cancel_btn.setEnabled(False)
-        self.update_label.setText("Cancelling update...")
+        self._set_update_status("Cancelling update...")
 
     def install_update(self):
         if self._update_busy or not self._available_update:
@@ -1946,7 +2029,7 @@ class App(QMainWindow):
         self._update_controls(True)
         self._update_cancel.clear()
         self.update_cancel_btn.setEnabled(True)
-        self.update_label.setText("Downloading update...")
+        self._set_update_status("Downloading update...")
         release = self._available_update
         def work():
             stage = None
@@ -1973,7 +2056,7 @@ class App(QMainWindow):
         if not self.running:
             return
         self._update_controls(False)
-        self.update_label.setText(message)
+        self._set_update_status(message)
 
     def _update_prepared(self, prepared):
         stage, helper = prepared
@@ -1985,7 +2068,7 @@ class App(QMainWindow):
             self._update_failed("Update helper stopped. Your app is unchanged; retry the update.")
             return
         if self._sync_in_flight:
-            self.update_label.setText("Update ready. Waiting for cloud sync to finish...")
+            self._set_update_status("Update ready. Waiting for cloud sync to finish...")
             QTimer.singleShot(500, lambda: self._update_prepared(prepared))
             return
         try:
