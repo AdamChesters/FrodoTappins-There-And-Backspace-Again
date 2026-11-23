@@ -1732,12 +1732,12 @@ class App(QMainWindow):
 
     def eventFilter(self, obj, event):
         et = event.type()
-        # Other windows (the support dialogs) can overlap this one's edges.
-        owner = obj.window() if isinstance(obj, QWidget) else obj
-        if owner is not self and owner is not self.windowHandle():
-            return super().eventFilter(obj, event)
-        if et in (QEvent.MouseMove, QEvent.MouseButtonPress,
-                  QEvent.HoverMove) and not self.isMaximized():
+        # Other windows (the support dialogs) can overlap this one's edges, so
+        # only events aimed at this window count.
+        if et in (QEvent.MouseMove, QEvent.MouseButtonPress, QEvent.HoverMove) \
+                and not self.isMaximized() \
+                and (obj.window() if isinstance(obj, QWidget) else obj) \
+                in (self, self.windowHandle()):
             # global position -> this window's local coords
             gp = event.globalPosition().toPoint() if hasattr(event, "globalPosition") \
                 else QCursor.pos()

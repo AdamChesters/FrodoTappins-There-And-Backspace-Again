@@ -1,12 +1,13 @@
 # Changelog
 
-## Unreleased
+## 0.3.2
 
 - The Feedback / Support button moved into the title bar, where the vine border no longer covers it. It reads "Update available" when a check finds a release.
 - The About / Support panel and the feedback form now share the main window's look: wood title bar, burl panel, vine border and parchment fields.
 - The panel shows the update status beside the version. "Check for updates" becomes "Download" when a release is found and "Cancel" while it downloads.
 - Support buttons carry their platform logos. Unavailable buttons now look disabled.
 - Fixed clicks on a support dialog being taken as a resize of the main window where the two overlap.
+- Message boxes now use the dark wood background, so their amber text is readable.
 
 ## 0.3.1
 
