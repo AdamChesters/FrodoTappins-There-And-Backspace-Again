@@ -1439,7 +1439,11 @@ class App(QMainWindow):
         """Dress a support dialog like the main window: frameless, wood title
         bar, burl panel and vine wreath. Returns the layout for its content."""
         dialog.setWindowFlag(Qt.FramelessWindowHint, True)
-        dialog.resize(dialog.width() + 90, dialog.height() + 130)  # room for the frame
+        # Room for the frame, but never larger than the screen: the dialog has
+        # no resize handle and its content scrolls.
+        screen = self.screen().availableGeometry()
+        dialog.resize(min(dialog.width() + 90, screen.width()),
+                      min(dialog.height() + 130, screen.height()))
         outer = QVBoxLayout(dialog); outer.setContentsMargins(0, 0, 0, 0); outer.setSpacing(0)
         outer.addWidget(TitleBar(dialog, title, self.windowIcon(), minimise=False,
                                  close_tip="Close"))

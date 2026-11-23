@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- The Windows EXE is now built with Python 3.14, which still receives Windows security updates. It was built with Python 3.12.
+- The About / Support panel and the feedback form no longer open taller or wider than the screen.
+
 ## 0.3.2
 
 - The Feedback / Support button moved into the title bar, where the vine border no longer covers it. It reads "Update available" when a check finds a release.
