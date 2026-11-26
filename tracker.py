@@ -350,6 +350,12 @@ class Config:
         # across launches. Defaults expanded.
         return bool(self.data.get("cloud_expanded", True))
 
+    @property
+    def check_updates(self) -> bool:
+        # Look for a newer release on GitHub at startup. Defaults on; a saved
+        # choice from the Updates checkbox always wins.
+        return bool(self.data.get("check_updates", True))
+
 
 # --------------------------------------------------------------------------- #
 # Counter (global keyboard listener) - counts only, never records content
@@ -1404,7 +1410,7 @@ class App(QMainWindow):
         self._tick();             self._tick_timer = self._every(1000, self._tick)
         self._autosave();         self._save_timer = self._every(5000, self._autosave)
         QTimer.singleShot(INITIAL_SYNC_MS, self._autosync)
-        if self.cfg.data.get("check_updates", False):
+        if self.cfg.check_updates:
             QTimer.singleShot(2000, self.check_updates)
 
         if start_minimized and HAVE_TRAY:
@@ -1652,7 +1658,7 @@ class App(QMainWindow):
             update_row.addWidget(button)
         col.addLayout(update_row)
         self.update_startup_chk = QCheckBox("Check GitHub for updates at startup")
-        self.update_startup_chk.setChecked(bool(self.cfg.data.get("check_updates", False)))
+        self.update_startup_chk.setChecked(self.cfg.check_updates)
         self.update_startup_chk.toggled.connect(self._save_update_preference)
         col.addWidget(self.update_startup_chk)
         update_note = QLabel("Download and restart installs the update automatically. "
@@ -1779,7 +1785,9 @@ class App(QMainWindow):
             "To uninstall, just delete everything.\n\n"
             "This tool runs offline and standalone, but can tally totals across "
             "multiple devices leveraging a free Cloudflare account. See the README "
-            "file for instructions.",
+            "file for instructions.\n\n"
+            "It checks GitHub for a newer version at startup. You can turn that "
+            "off under Updates.",
         )
 
     def _warn_not_writable(self):

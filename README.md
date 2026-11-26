@@ -37,7 +37,7 @@ stored, or transmitted. Only counted.
 
 It is fully **portable and offline**: everything lives in the app's own folder
 (move it, copy it to a USB stick, or delete it to uninstall — see below), and it
-makes no network connections unless you set up cloud sync, use the optional GitHub update checks or send feedback. It runs in
+makes no network connections unless you set up cloud sync or send feedback, apart from a check for a newer release on GitHub at startup, which you can turn off. It runs in
 the system tray and can start at login. With cloud sync configured it **auto-syncs
 every 15 minutes** (and on demand), showing each device's total and the combined
 cloud total side by side, so several machines roll into the same figures.
@@ -101,7 +101,8 @@ window appears showing today's figures and your all-time totals.
 
 The **Updates** section shows the installed version. Choose **Check GitHub**
 to look for a newer stable release. **Check GitHub for updates at startup**
-is optional and starts disabled, so offline use remains available.
+starts enabled. Untick it to stop the app contacting GitHub on its own. The app
+works the same offline: a failed check only shows a message in this section.
 
 The **Feedback / Support** button in the title bar opens the About panel, which
 shows the same version and update status. Its **Check for updates** button
@@ -330,7 +331,7 @@ separate read-only endpoint if you want a public view).
   followed by a separator, which matches normal typing well but won't reflect
   IME / CJK composition precisely.
 - **Auto-sync runs every 15 minutes** whenever a Worker URL and key are set, and
-  only then — cloud sync makes no network calls without cloud configuration. GitHub update checks are separate and optional.
+  only then — cloud sync makes no network calls without cloud configuration. GitHub update checks are separate: on at startup by default, and you can turn them off.
   Use the "Auto-sync to cloud every 15 min" checkbox to turn it off; "Push to
   Cloud" (push + pull) and "Refresh total" (pull only) remain for on-demand use.
 - Built and tested against the structure of `pynput`/`psutil`/`PySide6` (the Qt

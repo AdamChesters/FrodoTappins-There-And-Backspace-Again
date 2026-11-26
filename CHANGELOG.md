@@ -4,6 +4,7 @@
 
 - The Windows EXE is now built with Python 3.14, which still receives Windows security updates. It was built with Python 3.12.
 - The About / Support panel and the feedback form no longer open taller or wider than the screen.
+- The app now checks GitHub for a newer version at startup by default. Untick "Check GitHub for updates at startup" under Updates to turn it off. If you had already changed that checkbox, your choice is kept.
 
 ## 0.3.2
 
