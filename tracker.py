@@ -1362,6 +1362,8 @@ class App(QMainWindow):
         self._update_busy = False
         self._update_cancel = threading.Event()
         self._available_update = None
+        self._prompt_for_update = False
+        self._update_prompt = None
         self.tray = None
         self._first_run = first_run
         self._writable = writable
@@ -1411,7 +1413,7 @@ class App(QMainWindow):
         self._autosave();         self._save_timer = self._every(5000, self._autosave)
         QTimer.singleShot(INITIAL_SYNC_MS, self._autosync)
         if self.cfg.check_updates:
-            QTimer.singleShot(2000, self.check_updates)
+            QTimer.singleShot(2000, self._startup_update_check)
 
         if start_minimized and HAVE_TRAY:
             QTimer.singleShot(0, self.hide)
@@ -2002,6 +2004,11 @@ class App(QMainWindow):
             and os.name == "nt" and bool(getattr(sys, "frozen", False)))
         self.update_cancel_btn.setEnabled(False)
 
+    def _startup_update_check(self):
+        """The automatic check: unlike a manual one, it asks before installing."""
+        self._prompt_for_update = True
+        self.check_updates()
+
     def check_updates(self):
         if self._update_busy or not self.running:
             return
@@ -2017,6 +2024,7 @@ class App(QMainWindow):
     def _update_checked(self, release):
         if not self.running:
             return
+        prompt, self._prompt_for_update = self._prompt_for_update, False
         self._available_update = release
         self._update_controls(False)
         if release is None:
@@ -2029,6 +2037,8 @@ class App(QMainWindow):
                                     "Run the Windows EXE to install updates here.")
         else:
             self._set_update_status(f"{release['tag']} is ready to download.")
+        if release and prompt:
+            self._prompt_update(release)
 
     def _cancel_update(self):
         self._update_cancel.set()
@@ -2064,9 +2074,43 @@ class App(QMainWindow):
                 self.bridge.update_error.emit(str(error))
         threading.Thread(target=work, daemon=True).start()
 
+    def _prompt_update(self, release):
+        """Offer a release found by the startup check. Nothing installs without
+        a click; "Later" leaves it for the next start or the Updates controls."""
+        if self._update_prompt is not None or release is not self._available_update:
+            return
+        installable = self.update_install_btn.isEnabled()
+        self.show_window()
+        box = QMessageBox(QMessageBox.Information, APP_DISPLAY_NAME,
+                          f"FrodoTappins {release['tag']} is available. "
+                          f"You have version {updater.VERSION}.", QMessageBox.NoButton, self)
+        box.setInformativeText(
+            "Download and restart installs it now. Your counts and settings stay "
+            "in this folder." if installable else
+            "Open the Releases page to download it.")
+        accept = box.addButton("Download and restart" if installable else "Open Releases",
+                               QMessageBox.AcceptRole)
+        box.addButton("Later", QMessageBox.RejectRole)
+        box.setDefaultButton(accept)
+
+        def answered():
+            self._update_prompt = None
+            box.deleteLater()
+            if (box.clickedButton() is not accept or self._update_busy
+                    or release is not self._available_update):
+                return
+            if self.update_install_btn.isEnabled():
+                self.open_support()    # shows the download progress and Cancel
+            self._update_action()
+
+        box.finished.connect(answered)
+        self._update_prompt = box
+        box.open()
+
     def _update_failed(self, message):
         if not self.running:
             return
+        self._prompt_for_update = False
         self._update_controls(False)
         self._set_update_status(message)
 

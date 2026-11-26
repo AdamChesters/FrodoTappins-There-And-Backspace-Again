@@ -109,6 +109,11 @@ shows the same version and update status. Its **Check for updates** button
 becomes **Download** when a release is found and **Cancel** while it downloads.
 The title bar button reads **Update available** when a check finds a release.
 
+When the startup check finds a release, the app opens its window and asks
+whether to **Download and restart**. Nothing installs unless you choose it.
+**Later** leaves the update for the Updates controls and asks again the next
+time the app starts.
+
 When a compatible release is found, **Download and restart** downloads it,
 checks its size and SHA-256 against GitHub's release metadata, saves your counts,
 replaces the EXE and restarts the app. You can cancel before installation.

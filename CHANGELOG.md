@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.3.4
+
+- When the startup check finds a newer version, the app now asks whether to download it and restart. Nothing installs unless you choose it; "Later" asks again the next time the app starts.
+
 ## 0.3.3
 
 - The Windows EXE is now built with Python 3.14, which still receives Windows security updates. It was built with Python 3.12.
